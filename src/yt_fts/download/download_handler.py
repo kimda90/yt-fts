@@ -5,6 +5,7 @@ import json
 import random
 import sqlite3
 import tempfile
+import time
 
 import requests
 import yt_dlp
@@ -284,6 +285,8 @@ class DownloadHandler:
             future = executor.submit(self.get_vtt, self.tmp_dir, video_url, self.language)
             futures.append(future)
 
+            time.sleep(5)
+
         for i in range(len(self.video_ids)):
             futures[i].result()
 
@@ -315,8 +318,8 @@ class DownloadHandler:
                     'nocheckcertificate': True,
                     'ignoreerrors': False,
                     'no_color': True,
-                    'sleep_interval': 1,
-                    'max_sleep_interval': 5,
+                    'sleep_interval': 5,
+                    'max_sleep_interval': 15,
                     'retries': 3,
                     'fragment_retries': 3,
                     'skip_unavailable_fragments': True,
