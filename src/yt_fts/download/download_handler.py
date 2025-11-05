@@ -82,11 +82,14 @@ class DownloadHandler:
         playlist_data = self.get_playlist_data(playlist_url)
 
         for video in playlist_data:
-            channel_name = video["channel_name"]
-            channel_id = video["channel_id"]
-            channel_url = video["channel_url"]
-            if not check_if_channel_exists(channel_id):
-                add_channel_info(channel_id, channel_name, channel_url)
+            try:
+                channel_name = video["channel_name"]
+                channel_id = video["channel_id"]
+                channel_url = video["channel_url"]
+                if not check_if_channel_exists(channel_id):
+                    add_channel_info(channel_id, channel_name, channel_url)
+            except Exception as e:
+                self.console.print(f"[red]Error: {e}[/red]")
 
         self.video_ids = list(set(video["video_id"] for video in playlist_data))
 
@@ -305,7 +308,7 @@ class DownloadHandler:
                     'writeautomaticsub': True,
                     'subtitlesformat': 'vtt',
                     'skip_download': True,
-                    'subtitleslangs': ['en', '-live_chat'],  # Only English, prefer auto-generated
+                    'subtitleslangs': [language, '-live_chat'],  # Only English, prefer auto-generated
                     'quiet': True,
                     'no_warnings': True,
                     'progress_hooks': [self.quiet_progress_hook],
