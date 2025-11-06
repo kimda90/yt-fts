@@ -60,7 +60,7 @@ class DownloadHandler:
             self.update_channel(self.channel_id)
             return
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        with tempfile.TemporaryDirectory(delete=False) as tmp_dir:
             self.tmp_dir = tmp_dir
             channel_url = f"https://www.youtube.com/channel/{self.channel_id}/videos"
             self.video_ids = self.get_videos_list(channel_url)
@@ -94,7 +94,7 @@ class DownloadHandler:
 
         self.video_ids = list(set(video["video_id"] for video in playlist_data))
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        with tempfile.TemporaryDirectory(delete=False) as tmp_dir:
             self.console.print(f"[green][bold]Downloading [red]{len(playlist_data)}[/red] "
                                "vtt files[/bold][/green]\n")
             self.tmp_dir = tmp_dir
@@ -103,7 +103,7 @@ class DownloadHandler:
 
     def update_channel(self, target_channel: str | int) -> None:
 
-        with tempfile.TemporaryDirectory() as tmp_dir:
+        with tempfile.TemporaryDirectory(delete=False) as tmp_dir:
             self.tmp_dir = tmp_dir
             
             # Handle both channel_id and target_channel (rowid/name)
@@ -323,6 +323,8 @@ class DownloadHandler:
                     'retries': 3,
                     'fragment_retries': 3,
                     'skip_unavailable_fragments': True,
+                    'download_archive': f'{tmp_dir}/downloaded_videos.txt',
+                    'no_overwrites': True,
                 }
 
                 if self.cookies_from_browser is not None:
@@ -392,9 +394,10 @@ class DownloadHandler:
                         self.console.print(f"[red]Failed to get: {video_url}[/red]")
                         self.console.print(f"[red]Error: {error_msg}[/red]")
 
-    def vtt_to_db(self) -> None:
+    def vtt_to_db(self, tmp_dir:str=None) -> None:
 
-        tmp_dir = self.tmp_dir
+        if tmp_dir is None:
+            tmp_dir = self.tmp_dir
 
         items = os.listdir(tmp_dir)
         file_paths = [os.path.join(tmp_dir, item) for item in items if item.endswith('.vtt')]
@@ -417,7 +420,7 @@ class DownloadHandler:
             vid_date = get_date(vid_json['upload_date'])
             channel_id = vid_json['channel_id']
 
-            add_video(channel_id, vid_id, vid_title, vid_url, vid_date)
+            add_video(channel_id, vid_id, vid_title, vid_url, vid_date, force=tmp_dir is not None)
 
             vtt_json = parse_vtt(vtt)
 
