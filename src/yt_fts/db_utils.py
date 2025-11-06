@@ -80,7 +80,17 @@ def add_channel_info(channel_id: str, channel_name: str, channel_url: str) -> No
     })
 
 
-def add_video(channel_id: str, video_id: str, video_title: str, video_url: str, video_date: str) -> None:
+def add_video(channel_id: str, video_id: str, video_title: str, video_url: str, video_date: str, force: bool = False) -> None:
+    """
+    Add a video to the database.
+    Args:
+        channel_id (str): The ID of the channel the video belongs to.
+        video_id (str): The ID of the video.
+        video_title (str): The title of the video.
+        video_url (str): The URL of the video.
+        video_date (str): The date the video was uploaded.
+        force (bool): If True, the video will be added even if it already exists in the database.
+    """
     conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
     existing_video = cur.execute("SELECT * FROM Videos WHERE video_id = ?",
@@ -93,6 +103,11 @@ def add_video(channel_id: str, video_id: str, video_title: str, video_url: str, 
                     """,(video_id, video_title, video_url, video_date, channel_id))
         conn.commit()
 
+    elif force:
+        cur.execute("""
+                    UPDATE Videos SET video_title = ?, video_url = ?, video_date = ?, channel_id = ? WHERE video_id = ?
+                    """,(video_title, video_url, video_date, channel_id, video_id))
+        conn.commit()
     else:
         print(f"{video_id} Video already exists in the database.")
     conn.close()
