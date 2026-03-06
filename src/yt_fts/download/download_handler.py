@@ -207,6 +207,7 @@ class DownloadHandler:
                 },
                 'extract_flat': True,
                 'quiet': True,
+                'ignoreconfig': True,
                 'nocheckcertificate': True,
                 'sleep_interval': 1,
                 'max_sleep_interval': 3,
@@ -259,6 +260,7 @@ class DownloadHandler:
                 },
                 'quiet': True,
                 'extract_flat': True,
+                'ignoreconfig': True,
             }
 
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -306,6 +308,9 @@ class DownloadHandler:
                     'http_headers': {
                         'User-Agent': random.choice(self._user_agents)
                     },
+                    'format': 'bestaudio/best',
+                    'js_runtimes': {'node': {}},
+                    'remote_components': ['ejs:github'],
                     'outtmpl': f'{tmp_dir}/%(id)s',
                     'writeinfojson': True,
                     'writeautomaticsub': True,
@@ -314,6 +319,7 @@ class DownloadHandler:
                     'subtitleslangs': [language, '-live_chat'],  # Only English, prefer auto-generated
                     'quiet': True,
                     'no_warnings': True,
+                    'ignoreconfig': True,
                     'progress_hooks': [self.quiet_progress_hook],
                     'nocheckcertificate': True,
                     'ignoreerrors': False,
@@ -467,6 +473,7 @@ class DownloadHandler:
                 'quiet': True,
                 'no_warnings': True,
                 'extract_flat': True,
+                'ignoreconfig': True,
                 'http_headers': {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
                 }
@@ -495,6 +502,7 @@ class DownloadHandler:
                     'cookiesfrombrowser': (self.cookies_from_browser,),
                     'quiet': True,
                     'no_warnings': True,
+                    'ignoreconfig': True,
                 }
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     # Just test cookie extraction, don't download

@@ -99,6 +99,9 @@ class SummarizeHandler:
             console.print(f"Downloading subtitles for: {video_url}")
             with tempfile.TemporaryDirectory() as tmp_dir:
                 ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'js_runtimes': {'node': {}},
+                    'remote_components': ['ejs:github'],
                     'outtmpl': f'{tmp_dir}/%(id)s',
                     'writeinfojson': True,
                     'writeautomaticsub': True,
@@ -107,6 +110,7 @@ class SummarizeHandler:
                     'subtitleslangs': ['en', '-live_chat'],
                     'quiet': True,
                     'no_warnings': True,
+                    'ignoreconfig': True,
                     'progress_hook': [self.quiet_progress_hook],
                 }
 
