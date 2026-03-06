@@ -4,6 +4,7 @@ This is where I'm putting all the functions that don't belong anywhere else
 import datetime
 import re
 import sqlite3
+from pathlib import Path
 from typing import TypedDict
 import webvtt
 
@@ -48,11 +49,18 @@ def parse_vtt(vtt_path: str) -> list[dict[str, str]]:
     return result
 
 
+def _read_vtt_text(vtt_path: str) -> str:
+    try:
+        return Path(vtt_path).read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return Path(vtt_path).read_text(encoding="utf-8", errors="replace")
+
+
 def normal_vtt_parser(vtt_path: str) -> list[dict[str, str]]:
 
     result = []
 
-    for caption in webvtt.read(vtt_path):
+    for caption in webvtt.from_string(_read_vtt_text(vtt_path)):
         start_time = caption.start
         stop_time = caption.end
         text = caption.text
@@ -72,9 +80,7 @@ def word_level_vtt_parser(vtt_path: str) -> list[dict[str, str]]:
     result = []
 
     time_pattern = "^(.*) align:start position:0%"
-
-    with open(vtt_path, "r") as f:
-        lines = f.readlines()
+    lines = _read_vtt_text(vtt_path).splitlines(keepends=True)
 
     for count, line in enumerate(lines):
         time_match = re.match(time_pattern, line)
