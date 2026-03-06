@@ -50,11 +50,21 @@ def cli() -> None:
               help="Number of parallel download jobs (default: 8, recommended: 4-16 for most users)")
 @click.option("--cookies-from-browser", default=None,
               help="Browser to extract cookies from. Ex: chrome, firefox")
-def download(url: str, playlist: bool, language: str, jobs: int, cookies_from_browser: str | None) -> None:
+@click.option("--download-dir", default=None,
+              help="Persistent directory for downloaded VTT/info files")
+def download(
+    url: str,
+    playlist: bool,
+    language: str,
+    jobs: int,
+    cookies_from_browser: str | None,
+    download_dir: str | None,
+) -> None:
     download_handler = DownloadHandler(
         number_of_jobs=jobs,
         language=language,
-        cookies_from_browser=cookies_from_browser
+        cookies_from_browser=cookies_from_browser,
+        download_dir=download_dir,
     )
 
     if playlist:
@@ -139,11 +149,20 @@ def list(transcript: str | None, channel: str | None, library: bool) -> None:
 @click.option("--cookies-from-browser",
               default=None,
               help="Browser to extract cookies from. Ex: chrome, firefox")
-def update(channel: str | None, language: str, jobs: int, cookies_from_browser: str | None) -> None:
+@click.option("--download-dir", default=None,
+              help="Persistent directory for downloaded VTT/info files")
+def update(
+    channel: str | None,
+    language: str,
+    jobs: int,
+    cookies_from_browser: str | None,
+    download_dir: str | None,
+) -> None:
     update_handler = DownloadHandler(
         language=language,
         number_of_jobs=jobs,
-        cookies_from_browser=cookies_from_browser
+        cookies_from_browser=cookies_from_browser,
+        download_dir=download_dir,
     )
 
     if channel is not None:

@@ -49,7 +49,7 @@ def make_config_dir() -> str | None:
 
 
 def get_db_path() -> str:
-    from .db_utils import make_db
+    from .db_utils import ensure_db_schema, make_db
     # make sure config path exists
     # if config path is none, make config path
     # this also means the db doesn't exist
@@ -76,6 +76,7 @@ def get_db_path() -> str:
             make_db(db_path)
             return db_path
         else:
+            ensure_db_schema(db_path)
             return db_path 
 
     if platform == 'darwin' or platform == 'linux':
@@ -85,10 +86,14 @@ def get_db_path() -> str:
             make_db(db_path)
             return db_path 
         else:
+            ensure_db_schema(db_path)
             return db_path 
     
     print("db path not found, using current directory")
-    return "subtitles.db" 
+    db_path = "subtitles.db"
+    if os.path.exists(db_path):
+        ensure_db_schema(db_path)
+    return db_path 
 
 
 def get_or_make_chroma_path() -> str:

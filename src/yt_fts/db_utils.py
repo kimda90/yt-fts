@@ -1,6 +1,7 @@
 import sqlite3
 import sys
 import re
+from urllib.parse import parse_qs, urlparse
 
 from sqlite_utils import Database
 from rich.console import Console
@@ -68,6 +69,116 @@ def make_db(db_path: str) -> None:
         ]
 
     )
+
+    ensure_db_schema(db_path)
+
+
+def ensure_db_schema(db_path: str) -> None:
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS Playlists (
+            playlist_id TEXT PRIMARY KEY,
+            playlist_url TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS PlaylistVideos (
+            playlist_id TEXT NOT NULL,
+            video_id TEXT NOT NULL,
+            indexed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (playlist_id, video_id)
+        )
+    """)
+    cur.execute("""
+        CREATE INDEX IF NOT EXISTS idx_playlistvideos_video_id
+        ON PlaylistVideos (video_id)
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+def get_playlist_id_from_url(playlist_url: str) -> str | None:
+    parsed = urlparse(playlist_url)
+    return parse_qs(parsed.query).get("list", [None])[0]
+
+
+def upsert_playlist(playlist_id: str, playlist_url: str) -> None:
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO Playlists (playlist_id, playlist_url)
+        VALUES (?, ?)
+        ON CONFLICT(playlist_id) DO UPDATE SET
+            playlist_url = excluded.playlist_url,
+            last_seen_at = CURRENT_TIMESTAMP
+    """, (playlist_id, playlist_url))
+    conn.commit()
+    conn.close()
+
+
+def get_indexed_video_ids_for_playlist(playlist_id: str) -> set[str]:
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+    rows = cur.execute(
+        "SELECT video_id FROM PlaylistVideos WHERE playlist_id = ?",
+        (playlist_id,),
+    ).fetchall()
+    conn.close()
+    return {row[0] for row in rows}
+
+
+def _iter_video_id_batches(video_ids: list[str], batch_size: int = 900):
+    for index in range(0, len(video_ids), batch_size):
+        yield video_ids[index:index + batch_size]
+
+
+def get_existing_video_ids(video_ids: list[str]) -> set[str]:
+    if not video_ids:
+        return set()
+
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+    existing_video_ids: set[str] = set()
+
+    for batch in _iter_video_id_batches(video_ids):
+        placeholders = ",".join("?" for _ in batch)
+        rows = cur.execute(
+            f"SELECT video_id FROM Videos WHERE video_id IN ({placeholders})",
+            batch,
+        ).fetchall()
+        existing_video_ids.update(row[0] for row in rows)
+
+    conn.close()
+    return existing_video_ids
+
+
+def record_playlist_videos(playlist_id: str, video_ids: list[str]) -> None:
+    if not video_ids:
+        return
+
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+    cur.executemany(
+        """
+        INSERT OR IGNORE INTO PlaylistVideos (playlist_id, video_id)
+        VALUES (?, ?)
+        """,
+        [(playlist_id, video_id) for video_id in video_ids],
+    )
+    conn.commit()
+    conn.close()
+
+
+def seed_playlist_index(playlist_id: str, playlist_url: str, video_ids: list[str]) -> set[str]:
+    upsert_playlist(playlist_id, playlist_url)
+    existing_video_ids = get_existing_video_ids(video_ids)
+    record_playlist_videos(playlist_id, list(existing_video_ids))
+    return existing_video_ids
 
 
 def add_channel_info(channel_id: str, channel_name: str, channel_url: str) -> None:
@@ -351,13 +462,15 @@ def delete_channel(channel_id: str) -> None:
     conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
-    cur.execute("DELETE FROM Channels WHERE channel_id = ?", (channel_id,))
-
     # make sure to delete all subtitles and embeddings before videos  
+    cur.execute("DELETE FROM PlaylistVideos WHERE video_id IN (SELECT video_id FROM Videos WHERE channel_id = ?)",
+                (channel_id,))
     cur.execute("DELETE FROM Subtitles WHERE video_id IN (SELECT video_id FROM Videos WHERE channel_id = ?)",
                 (channel_id,))
 
     cur.execute("DELETE FROM Videos WHERE channel_id = ?", (channel_id,))
+
+    cur.execute("DELETE FROM Channels WHERE channel_id = ?", (channel_id,))
 
     cur.execute("DELETE FROM SemanticSearchEnabled WHERE channel_id = ?", (channel_id,))
 

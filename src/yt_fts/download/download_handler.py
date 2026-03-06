@@ -6,6 +6,7 @@ import random
 import sqlite3
 import tempfile
 import time
+from contextlib import contextmanager
 
 import requests
 import yt_dlp
@@ -21,10 +22,15 @@ from ..db_utils import (
     add_video,
     add_channel_info,
     check_if_channel_exists,
+    get_indexed_video_ids_for_playlist,
+    get_playlist_id_from_url,
     get_channel_id_from_input,
     get_num_vids,
     get_vid_ids_by_channel_id,
-    get_channels
+    get_channels,
+    record_playlist_videos,
+    seed_playlist_index,
+    upsert_playlist,
 )
 
 from ..utils import parse_vtt, get_date, handle_reject_consent_cookie
@@ -34,21 +40,57 @@ from rich.console import Console
 
 
 class DownloadHandler:
-    def __init__(self, number_of_jobs: int = 8, language: str = 'en', cookies_from_browser: str | None = None) -> None:
+    def __init__(
+        self,
+        number_of_jobs: int = 8,
+        language: str = 'en',
+        cookies_from_browser: str | None = None,
+        download_dir: str | None = None,
+    ) -> None:
 
         self.console = Console()
 
         self.cookies_from_browser = cookies_from_browser
         self.number_of_jobs = number_of_jobs
         self.language = language
+        self.download_dir = download_dir
 
         self.session: requests.Session | None = None
         self.channel_id: str | None = None
         self.channel_name: str | None = None
         self.video_ids: list[str] | None = None
         self.tmp_dir: str | None = None
+        self.current_playlist_id: str | None = None
+
+    @contextmanager
+    def _managed_download_dir(self):
+        if self.download_dir is not None:
+            Path(self.download_dir).mkdir(parents=True, exist_ok=True)
+            yield self.download_dir
+            return
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            yield tmp_dir
+
+    def _get_current_vtt_paths(self, base_dir: str) -> list[str]:
+        target_video_ids = set(self.video_ids or [])
+        items = os.listdir(base_dir)
+        file_paths = []
+
+        for item in items:
+            if not item.endswith('.vtt'):
+                continue
+
+            video_id = item.split('.')[0]
+            if target_video_ids and video_id not in target_video_ids:
+                continue
+
+            file_paths.append(os.path.join(base_dir, item))
+
+        return file_paths
 
     def download_channel(self, url: str) -> None:
+        self.current_playlist_id = None
 
         self.validate_channel_url(url)
         self.session = self.init_session(url)
@@ -60,7 +102,7 @@ class DownloadHandler:
             self.update_channel(self.channel_id)
             return
 
-        with tempfile.TemporaryDirectory(delete=False) as tmp_dir:
+        with self._managed_download_dir() as tmp_dir:
             self.tmp_dir = tmp_dir
             channel_url = f"https://www.youtube.com/channel/{self.channel_id}/videos"
             self.video_ids = self.get_videos_list(channel_url)
@@ -81,6 +123,33 @@ class DownloadHandler:
         self.number_of_jobs = number_of_jobs
 
         playlist_data = self.get_playlist_data(playlist_url)
+        original_playlist_count = len(playlist_data)
+        playlist_id = get_playlist_id_from_url(playlist_url)
+        indexed_video_ids: set[str] = set()
+
+        if playlist_id is not None:
+            upsert_playlist(playlist_id, playlist_url)
+            indexed_video_ids = get_indexed_video_ids_for_playlist(playlist_id)
+
+            if not indexed_video_ids:
+                seeded_video_ids = seed_playlist_index(
+                    playlist_id,
+                    playlist_url,
+                    [video["video_id"] for video in playlist_data],
+                )
+                if seeded_video_ids:
+                    self.console.print(
+                        f"[yellow]Indexed {len(seeded_video_ids)} existing playlist video(s) from the database.[/yellow]"
+                    )
+                indexed_video_ids = seeded_video_ids
+
+            playlist_data = [video for video in playlist_data if video["video_id"] not in indexed_video_ids]
+
+            skipped_count = original_playlist_count - len(playlist_data)
+            if skipped_count > 0:
+                self.console.print(
+                    f"[yellow]Skipping {skipped_count} playlist video(s) already indexed for this playlist.[/yellow]"
+                )
 
         for video in playlist_data:
             try:
@@ -92,9 +161,14 @@ class DownloadHandler:
             except Exception as e:
                 self.console.print(f"[red]Error: {e}[/red]")
 
-        self.video_ids = list(set(video["video_id"] for video in playlist_data))
+        self.video_ids = list(dict.fromkeys(video["video_id"] for video in playlist_data))
+        self.current_playlist_id = playlist_id
 
-        with tempfile.TemporaryDirectory(delete=False) as tmp_dir:
+        if len(self.video_ids) == 0:
+            self.console.print("[yellow]No new playlist videos to download.[/yellow]")
+            return
+
+        with self._managed_download_dir() as tmp_dir:
             self.console.print(f"[green][bold]Downloading [red]{len(playlist_data)}[/red] "
                                "vtt files[/bold][/green]\n")
             self.tmp_dir = tmp_dir
@@ -102,8 +176,9 @@ class DownloadHandler:
             self.vtt_to_db()
 
     def update_channel(self, target_channel: str | int) -> None:
+        self.current_playlist_id = None
 
-        with tempfile.TemporaryDirectory(delete=False) as tmp_dir:
+        with self._managed_download_dir() as tmp_dir:
             self.tmp_dir = tmp_dir
             
             # Handle both channel_id and target_channel (rowid/name)
@@ -135,7 +210,7 @@ class DownloadHandler:
 
             self.download_vtts()
 
-            vtt_to_parse = os.listdir(self.tmp_dir)
+            vtt_to_parse = self._get_current_vtt_paths(self.tmp_dir)
 
             if len(vtt_to_parse) == 0:
                 self.console.print("No new videos saved")
@@ -329,7 +404,7 @@ class DownloadHandler:
                     'retries': 3,
                     'fragment_retries': 3,
                     'skip_unavailable_fragments': True,
-                    'download_archive': f'{tmp_dir}/downloaded_videos.txt',
+                    'download_archive': os.path.join(tmp_dir, 'downloaded_videos.txt'),
                     'no_overwrites': True,
                 }
 
@@ -405,11 +480,11 @@ class DownloadHandler:
         if tmp_dir is None:
             tmp_dir = self.tmp_dir
 
-        items = os.listdir(tmp_dir)
-        file_paths = [os.path.join(tmp_dir, item) for item in items if item.endswith('.vtt')]
+        file_paths = self._get_current_vtt_paths(tmp_dir)
 
         con = sqlite3.connect(get_db_path())
         cur = con.cursor()
+        imported_video_ids: list[str] = []
 
         for vtt in track(file_paths, description="Adding subtitles to database..."):
             base_name = os.path.basename(vtt)
@@ -440,8 +515,13 @@ class DownloadHandler:
                             """, (vid_id, start_time, stop_time, text))
 
             con.commit()
+            imported_video_ids.append(vid_id)
 
         con.close()
+
+        if self.current_playlist_id is not None:
+            record_playlist_videos(self.current_playlist_id, imported_video_ids)
+            self.current_playlist_id = None
 
     def diagnose_403_errors(self, test_url: str = "https://www.youtube.com/watch?v=dQw4w9WgXcQ") -> None:
         """
